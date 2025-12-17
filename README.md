@@ -1,81 +1,86 @@
 <div align="center">
 
-# 🚀 Kiro OpenAI Gateway
+# KiroGate
 
-**OpenAI-compatible proxy gateway for Kiro IDE API (AWS CodeWhisperer)**
+**OpenAI & Anthropic 兼容的 Kiro IDE API 代理网关**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 
-*Use Claude models through any tools that support the OpenAI API*
+*通过任何支持 OpenAI 或 Anthropic API 的工具使用 Claude 模型*
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [API Reference](#-api-reference) • [License](#-license)
+[功能特性](#-功能特性) • [快速开始](#-快速开始) • [配置说明](#%EF%B8%8F-配置说明) • [API 参考](#-api-参考) • [许可证](#-许可证)
 
 </div>
 
 ---
 
-## ✨ Features
-
-| Feature | Description |
-|---------|-------------|
-| 🔌 **OpenAI-compatible API** | Works with any OpenAI client out of the box |
-| 💬 **Full message history** | Passes complete conversation context |
-| 🛠️ **Tool Calling** | Supports function calling in OpenAI format |
-| 📡 **Streaming** | Full SSE streaming support |
-| 🔄 **Retry Logic** | Automatic retries on errors (403, 429, 5xx) |
-| 📋 **Extended model list** | Including versioned models |
-| 🔐 **Smart token management** | Automatic refresh before expiration |
-| 🧩 **Modular architecture** | Easy to extend with new providers |
+> **致谢**: 本项目基于 [kiro-openai-gateway](https://github.com/Jwadow/kiro-openai-gateway) by [@Jwadow](https://github.com/jwadow) 开发
 
 ---
 
-## 🚀 Quick Start
+## ✨ 功能特性
 
-### Prerequisites
+| 功能 | 说明 |
+|------|------|
+| **OpenAI 兼容 API** | 支持任何 OpenAI 客户端开箱即用 |
+| **Anthropic 兼容 API** | 支持 Claude Code CLI 和 Anthropic SDK |
+| **完整消息历史** | 传递完整的对话上下文 |
+| **工具调用** | 支持 OpenAI 和 Anthropic 格式的 Function Calling |
+| **流式传输** | 完整的 SSE 流式传输支持 |
+| **自动重试** | 遇到错误时自动重试 (403, 429, 5xx) |
+| **多模型支持** | 支持多种 Claude 模型版本 |
+| **智能 Token 管理** | 自动在过期前刷新凭证 |
+| **模块化架构** | 易于扩展新的提供商 |
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
 
 - Python 3.10+
-- [Kiro IDE](https://kiro.dev/) with logged in account
+- [Kiro IDE](https://kiro.dev/) 并已登录账号
 
-### Installation
+### 安装步骤
 
 ```bash
-# Clone the repository
-git clone https://github.com/Jwadow/kiro-openai-gateway.git
-cd kiro-openai-gateway
+# 克隆仓库
+git clone https://github.com/aliom-v/KiroGate.git
+cd KiroGate
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 
-# Configure (see Configuration section)
+# 配置环境变量
 cp .env.example .env
-# Edit .env with your credentials
+# 编辑 .env 填写你的凭证
 
-# Start the server
+# 启动服务器
 python main.py
 ```
 
-The server will be available at `http://localhost:8000`
+服务器将在 `http://localhost:8000` 启动
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ 配置说明
 
-### Option 1: JSON Credentials File
+### 方式一: JSON 凭证文件（推荐）
 
-Specify the path to the credentials file:
+在 `.env` 中指定凭证文件路径:
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
 
-# Password to protect YOUR proxy server (make up any secure string)
-# You'll use this as api_key when connecting to your gateway
+# 用于保护你的代理服务器的密码（自己设置一个安全的字符串）
+# 连接网关时需要使用这个密码作为 api_key
 PROXY_API_KEY="my-super-secret-password-123"
 ```
 
 <details>
-<summary>📄 JSON file format</summary>
+<summary>📄 JSON 文件格式</summary>
 
 ```json
 {
@@ -89,59 +94,71 @@ PROXY_API_KEY="my-super-secret-password-123"
 
 </details>
 
-### Option 2: Environment Variables (.env file)
+### 方式二: 环境变量
 
-Create a `.env` file in the project root:
+在项目根目录创建 `.env` 文件:
 
 ```env
-# Required
-REFRESH_TOKEN="your_kiro_refresh_token"
+# 必填
+REFRESH_TOKEN="你的kiro_refresh_token"
 
-# Password to protect YOUR proxy server (make up any secure string)
+# 代理服务器密码
 PROXY_API_KEY="my-super-secret-password-123"
 
-# Optional
+# 可选
 PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
-### Getting the Refresh Token
+### 获取 Refresh Token
 
-The refresh token can be obtained by intercepting Kiro IDE traffic. Look for requests to:
+可以通过拦截 Kiro IDE 流量获取 refresh token。查找发往以下地址的请求:
 - `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
 
 ---
 
-## 📡 API Reference
+## 📡 API 参考
 
-### Endpoints
+### 端点列表
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check |
-| `/health` | GET | Detailed health check |
-| `/v1/models` | GET | List available models |
-| `/v1/chat/completions` | POST | Chat completions |
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 健康检查 |
+| `/health` | GET | 详细健康检查 |
+| `/v1/models` | GET | 获取可用模型列表 |
+| `/v1/chat/completions` | POST | OpenAI 兼容的聊天补全 |
+| `/v1/messages` | POST | Anthropic 兼容的消息 API |
 
-### Available Models
+### 认证方式
 
-| Model | Description |
-|-------|-------------|
-| `claude-opus-4-5` | Top-tier model |
-| `claude-opus-4-5-20251101` | Top-tier model (versioned) |
-| `claude-sonnet-4-5` | Enhanced model |
-| `claude-sonnet-4-5-20250929` | Enhanced model (versioned) |
-| `claude-sonnet-4` | Balanced model |
-| `claude-sonnet-4-20250514` | Balanced model (versioned) |
-| `claude-haiku-4-5` | Fast model |
-| `claude-3-7-sonnet-20250219` | Legacy model |
+两个端点都支持两种认证方式:
+
+| 方式 | 请求头 | 格式 |
+|------|--------|------|
+| OpenAI 风格 | `Authorization` | `Bearer {PROXY_API_KEY}` |
+| Anthropic 风格 | `x-api-key` | `{PROXY_API_KEY}` |
+
+### 可用模型
+
+| 模型 | 说明 |
+|------|------|
+| `claude-opus-4-5` | 顶级模型 |
+| `claude-opus-4-5-20251101` | 顶级模型（版本号） |
+| `claude-sonnet-4-5` | 增强模型 |
+| `claude-sonnet-4-5-20250929` | 增强模型（版本号） |
+| `claude-sonnet-4` | 均衡模型 |
+| `claude-sonnet-4-20250514` | 均衡模型（版本号） |
+| `claude-haiku-4-5` | 快速模型 |
+| `claude-3-7-sonnet-20250219` | 旧版模型 |
 
 ---
 
-## 💡 Usage Examples
+## 💡 使用示例
+
+### OpenAI API 格式
 
 <details>
-<summary>🔹 Simple cURL Request</summary>
+<summary>🔹 cURL 请求</summary>
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -149,58 +166,8 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-sonnet-4-5",
-    "messages": [{"role": "user", "content": "Hello!"}],
+    "messages": [{"role": "user", "content": "你好！"}],
     "stream": true
-  }'
-```
-
-> **Note:** Replace `my-super-secret-password-123` with the `PROXY_API_KEY` you set in your `.env` file.
-
-</details>
-
-<details>
-<summary>🔹 Streaming Request</summary>
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer my-super-secret-password-123" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-sonnet-4-5",
-    "messages": [
-      {"role": "system", "content": "You are a helpful assistant."},
-      {"role": "user", "content": "What is 2+2?"}
-    ],
-    "stream": true
-  }'
-```
-
-</details>
-
-<details>
-<summary>🔹 With Tool Calling</summary>
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer my-super-secret-password-123" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-sonnet-4-5",
-    "messages": [{"role": "user", "content": "What is the weather in London?"}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "get_weather",
-        "description": "Get weather for a location",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "location": {"type": "string", "description": "City name"}
-          },
-          "required": ["location"]
-        }
-      }
-    }]
   }'
 ```
 
@@ -214,14 +181,14 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="my-super-secret-password-123"  # Your PROXY_API_KEY from .env
+    api_key="my-super-secret-password-123"  # 你的 PROXY_API_KEY
 )
 
 response = client.chat.completions.create(
     model="claude-sonnet-4-5",
     messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Hello!"}
+        {"role": "system", "content": "你是一个有帮助的助手。"},
+        {"role": "user", "content": "你好！"}
     ],
     stream=True
 )
@@ -241,152 +208,196 @@ from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="my-super-secret-password-123",  # Your PROXY_API_KEY from .env
+    api_key="my-super-secret-password-123",
     model="claude-sonnet-4-5"
 )
 
-response = llm.invoke("Hello, how are you?")
+response = llm.invoke("你好，今天怎么样？")
 print(response.content)
+```
+
+</details>
+
+### Anthropic API 格式
+
+<details>
+<summary>🤖 Claude Code CLI</summary>
+
+配置 Claude Code CLI 使用你的网关:
+
+```bash
+# 设置环境变量
+export ANTHROPIC_BASE_URL="http://localhost:8000"
+export ANTHROPIC_API_KEY="my-super-secret-password-123"  # 你的 PROXY_API_KEY
+
+# 或者在 Claude Code 设置中配置
+claude config set --global apiBaseUrl "http://localhost:8000"
+```
+
+</details>
+
+<details>
+<summary>🐍 Anthropic Python SDK</summary>
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://localhost:8000",
+    api_key="my-super-secret-password-123"  # 你的 PROXY_API_KEY
+)
+
+# 非流式
+message = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": "你好，Claude！"}
+    ]
+)
+print(message.content[0].text)
+
+# 流式
+with client.messages.stream(
+    model="claude-sonnet-4-5",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "你好！"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+```
+
+</details>
+
+<details>
+<summary>🔹 Anthropic cURL 请求</summary>
+
+```bash
+curl http://localhost:8000/v1/messages \
+  -H "x-api-key: my-super-secret-password-123" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "你好！"}]
+  }'
 ```
 
 </details>
 
 ---
 
-## 📁 Project Structure
+## 📁 项目结构
 
 ```
-kiro-openai-gateway/
-├── main.py                    # Entry point, FastAPI app creation
-├── requirements.txt           # Python dependencies
-├── .env.example               # Environment configuration example
+kiro-bridge/
+├── main.py                    # 入口点，FastAPI 应用
+├── requirements.txt           # Python 依赖
+├── .env.example               # 环境配置示例
 │
-├── kiro_gateway/              # Main package
-│   ├── __init__.py            # Package exports
-│   ├── config.py              # Configuration and constants
-│   ├── models.py              # Pydantic models for OpenAI API
-│   ├── auth.py                # KiroAuthManager - token management
-│   ├── cache.py               # ModelInfoCache - model caching
-│   ├── utils.py               # Helper utilities
-│   ├── converters.py          # OpenAI <-> Kiro conversion
-│   ├── parsers.py             # AWS SSE stream parsers
-│   ├── streaming.py           # Response streaming logic
-│   ├── http_client.py         # HTTP client with retry logic
-│   ├── debug_logger.py        # Debug logging (optional)
-│   └── routes.py              # FastAPI routes
+├── kiro_gateway/              # 主包
+│   ├── __init__.py            # 包导出
+│   ├── config.py              # 配置和常量
+│   ├── models.py              # Pydantic 模型（OpenAI & Anthropic API）
+│   ├── auth.py                # KiroAuthManager - Token 管理
+│   ├── cache.py               # ModelInfoCache - 模型缓存
+│   ├── utils.py               # 工具函数
+│   ├── converters.py          # OpenAI/Anthropic <-> Kiro 格式转换
+│   ├── parsers.py             # AWS SSE 流解析器
+│   ├── streaming.py           # 响应流处理逻辑
+│   ├── http_client.py         # HTTP 客户端（带重试逻辑）
+│   ├── debug_logger.py        # 调试日志（可选）
+│   └── routes.py              # FastAPI 路由
 │
-├── tests/                     # Tests
-│   ├── unit/                  # Unit tests
-│   └── integration/           # Integration tests
+├── tests/                     # 测试
+│   ├── unit/                  # 单元测试
+│   └── integration/           # 集成测试
 │
-└── debug_logs/                # Debug logs (generated when enabled)
+└── debug_logs/                # 调试日志（启用时生成）
 ```
 
 ---
 
-## 🔧 Debugging
+## 🔧 调试
 
-Debug logging is **disabled by default**. To enable, add to your `.env`:
+调试日志默认**禁用**。要启用，请在 `.env` 中添加:
 
 ```env
-# Debug logging mode:
-# - off: disabled (default)
-# - errors: save logs only for failed requests (4xx, 5xx) - recommended for troubleshooting
-# - all: save logs for every request (overwrites on each request)
+# 调试日志模式:
+# - off: 禁用（默认）
+# - errors: 仅保存失败请求的日志 (4xx, 5xx) - 推荐用于排查问题
+# - all: 保存所有请求的日志（每次请求覆盖）
 DEBUG_MODE=errors
 ```
 
-### Debug Modes
+### 调试模式
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `off` | Disabled (default) | Production |
-| `errors` | Save logs only for failed requests (4xx, 5xx) | **Recommended for troubleshooting** |
-| `all` | Save logs for every request | Development/debugging |
+| 模式 | 说明 | 使用场景 |
+|------|------|----------|
+| `off` | 禁用（默认） | 生产环境 |
+| `errors` | 仅保存失败请求的日志 | **推荐用于排查问题** |
+| `all` | 保存所有请求的日志 | 开发/调试 |
 
-### Debug Files
+### 调试文件
 
-When enabled, requests are logged to the `debug_logs/` folder:
+启用后，请求日志保存在 `debug_logs/` 文件夹:
 
-| File | Description |
-|------|-------------|
-| `request_body.json` | Incoming request from client (OpenAI format) |
-| `kiro_request_body.json` | Request sent to Kiro API |
-| `response_stream_raw.txt` | Raw stream from Kiro |
-| `response_stream_modified.txt` | Transformed stream (OpenAI format) |
-| `app_logs.txt` | Application logs for the request |
-| `error_info.json` | Error details (only on errors) |
+| 文件 | 说明 |
+|------|------|
+| `request_body.json` | 客户端的请求（OpenAI 格式） |
+| `kiro_request_body.json` | 发送给 Kiro API 的请求 |
+| `response_stream_raw.txt` | Kiro 的原始响应流 |
+| `response_stream_modified.txt` | 转换后的响应流 |
+| `app_logs.txt` | 应用日志 |
+| `error_info.json` | 错误详情（仅错误时） |
 
 ---
 
-## 🧪 Testing
+## 🧪 测试
 
 ```bash
-# Run all tests
+# 运行所有测试
 pytest
 
-# Run unit tests only
+# 仅运行单元测试
 pytest tests/unit/
 
-# Run with coverage
+# 带覆盖率运行
 pytest --cov=kiro_gateway
 ```
 
 ---
 
-## 🔌 Extending with New Providers
+## 📜 许可证
 
-The modular architecture makes it easy to add support for other providers:
+本项目采用 **GNU Affero General Public License v3.0 (AGPL-3.0)** 许可证。
 
-1. Create a new module `kiro_gateway/providers/new_provider.py`
-2. Implement the required classes:
-   - `NewProviderAuthManager` — token management
-   - `NewProviderConverter` — format conversion
-   - `NewProviderParser` — response parsing
-3. Add routes to `routes.py` or create a separate router
+这意味着:
+- ✅ 你可以使用、修改和分发本软件
+- ✅ 你可以用于商业目的
+- ⚠️ 分发软件时**必须公开源代码**
+- ⚠️ **网络使用视为分发** — 如果你运行修改版本的服务器并让他人与其交互，必须向他们提供源代码
+- ⚠️ 修改后的版本必须使用相同的许可证
 
----
-
-## 📜 License
-
-This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
-
-This means:
-- ✅ You can use, modify, and distribute this software
-- ✅ You can use it for commercial purposes
-- ⚠️ **You must disclose source code** when you distribute the software
-- ⚠️ **Network use is distribution** — if you run a modified version on a server and let others interact with it, you must make the source code available to them
-- ⚠️ Modifications must be released under the same license
-
-See the [LICENSE](LICENSE) file for the full license text.
-
-### Why AGPL-3.0?
-
-AGPL-3.0 ensures that improvements to this software benefit the entire community. If you modify this gateway and deploy it as a service, you must share your improvements with your users.
-
-### Contributor License Agreement (CLA)
-
-By submitting a contribution to this project, you agree to the terms of our [Contributor License Agreement (CLA)](CLA.md). This ensures that:
-- You have the right to submit the contribution
-- You grant the maintainer rights to use and relicense your contribution
-- The project remains legally protected
+查看 [LICENSE](LICENSE) 文件了解完整的许可证文本。
 
 ---
 
-## 👤 Author
+## 🙏 致谢
 
-**Jwadow** — [@Jwadow](https://github.com/jwadow)
+本项目基于 [kiro-openai-gateway](https://github.com/Jwadow/kiro-openai-gateway) 开发，感谢原作者 [@Jwadow](https://github.com/jwadow) 的贡献。
 
 ---
 
-## ⚠️ Disclaimer
+## ⚠️ 免责声明
 
-This project is not affiliated with, endorsed by, or sponsored by Amazon Web Services (AWS), Anthropic, or Kiro IDE. Use at your own risk and in compliance with the terms of service of the underlying APIs.
+本项目与 Amazon Web Services (AWS)、Anthropic 或 Kiro IDE 没有任何关联、背书或赞助关系。使用时请自行承担风险，并遵守相关 API 的服务条款。
 
 ---
 
 <div align="center">
 
-**[⬆ Back to Top](#-kiro-openai-gateway)**
+**[⬆ 返回顶部](#kirogate)**
 
 </div>

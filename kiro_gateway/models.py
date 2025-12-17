@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Pydantic модели для OpenAI-совместимого API.
+OpenAI 兼容 API 的 Pydantic 模型。
 
 Определяет схемы данных для запросов и ответов,
 обеспечивая валидацию и сериализацию.
@@ -249,7 +250,7 @@ class ChatCompletionChunkChoice(BaseModel):
 class ChatCompletionChunk(BaseModel):
     """
     Streaming chunk в формате OpenAI.
-    
+
     Attributes:
         id: Уникальный ID ответа
         object: Тип объекта ("chat.completion.chunk")
@@ -264,3 +265,166 @@ class ChatCompletionChunk(BaseModel):
     model: str
     choices: List[ChatCompletionChunkChoice]
     usage: Optional[ChatCompletionUsage] = None
+
+
+# ==================================================================================================
+# Модели для Anthropic Messages API (/v1/messages)
+# ==================================================================================================
+
+class AnthropicContentBlock(BaseModel):
+    """
+    Content block для Anthropic Messages API.
+
+    Поддерживает различные типы контента: text, image, tool_use, tool_result, thinking.
+
+    Attributes:
+        type: Тип контента
+        text: Текстовое содержимое (для type="text")
+        source: Источник изображения (для type="image")
+        id: ID tool_use (для type="tool_use")
+        name: Имя инструмента (для type="tool_use")
+        input: Входные данные инструмента (для type="tool_use")
+        tool_use_id: ID связанного tool_use (для type="tool_result")
+        content: Результат инструмента (для type="tool_result")
+        is_error: Флаг ошибки (для type="tool_result")
+        thinking: Содержимое thinking (для type="thinking")
+    """
+    type: str  # "text", "image", "tool_use", "tool_result", "thinking"
+    text: Optional[str] = None
+    # image fields
+    source: Optional[Dict[str, Any]] = None  # {"type": "base64"/"url", "media_type": "...", "data"/"url": "..."}
+    # tool_use fields
+    id: Optional[str] = None
+    name: Optional[str] = None
+    input: Optional[Dict[str, Any]] = None
+    # tool_result fields
+    tool_use_id: Optional[str] = None
+    content: Optional[Union[str, List[Any]]] = None
+    is_error: Optional[bool] = None
+    # thinking fields
+    thinking: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class AnthropicMessage(BaseModel):
+    """
+    Сообщение в формате Anthropic.
+
+    Attributes:
+        role: Роль (user или assistant)
+        content: Содержимое (строка или список content blocks)
+    """
+    role: str  # "user" or "assistant"
+    content: Union[str, List[AnthropicContentBlock], List[Dict[str, Any]]]
+
+    model_config = {"extra": "allow"}
+
+
+class AnthropicTool(BaseModel):
+    """
+    Инструмент в формате Anthropic.
+
+    Attributes:
+        name: Имя инструмента
+        description: Описание инструмента
+        input_schema: JSON Schema входных параметров
+    """
+    name: str
+    description: Optional[str] = None
+    input_schema: Dict[str, Any]
+
+    model_config = {"extra": "allow"}
+
+
+class AnthropicMessagesRequest(BaseModel):
+    """
+    Запрос к Anthropic Messages API.
+
+    Attributes:
+        model: ID модели
+        messages: Список сообщений
+        max_tokens: Максимальное количество токенов (обязательно)
+        system: Системный промпт
+        tools: Список инструментов
+        tool_choice: Стратегия выбора инструмента
+        temperature: Температура генерации
+        top_p: Top-p sampling
+        top_k: Top-k sampling
+        stop_sequences: Стоп-последовательности
+        stream: Использовать streaming
+        metadata: Метаданные запроса
+        thinking: Настройки extended thinking
+    """
+    model: str
+    messages: Annotated[List[AnthropicMessage], Field(min_length=1)]
+    max_tokens: int  # Required in Anthropic API
+    system: Optional[Union[str, List[Dict[str, Any]]]] = None
+    tools: Optional[List[AnthropicTool]] = None
+    tool_choice: Optional[Dict[str, Any]] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+    stop_sequences: Optional[List[str]] = None
+    stream: bool = False
+    metadata: Optional[Dict[str, Any]] = None
+    # Extended Thinking support
+    thinking: Optional[Dict[str, Any]] = None  # {"type": "enabled", "budget_tokens": 1024}
+
+    model_config = {"extra": "allow"}
+
+
+class AnthropicUsage(BaseModel):
+    """
+    Информация об использовании токенов в формате Anthropic.
+
+    Attributes:
+        input_tokens: Количество входных токенов
+        output_tokens: Количество выходных токенов
+    """
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class AnthropicResponseContentBlock(BaseModel):
+    """
+    Content block в ответе Anthropic.
+
+    Attributes:
+        type: Тип контента (text, tool_use, thinking)
+        text: Текстовое содержимое
+        id: ID tool_use
+        name: Имя инструмента
+        input: Входные данные инструмента
+        thinking: Содержимое thinking
+    """
+    type: str  # "text", "tool_use", "thinking"
+    text: Optional[str] = None
+    id: Optional[str] = None
+    name: Optional[str] = None
+    input: Optional[Dict[str, Any]] = None
+    thinking: Optional[str] = None
+
+
+class AnthropicMessagesResponse(BaseModel):
+    """
+    Ответ Anthropic Messages API.
+
+    Attributes:
+        id: Уникальный ID ответа
+        type: Тип объекта (всегда "message")
+        role: Роль (всегда "assistant")
+        content: Список content blocks
+        model: Использованная модель
+        stop_reason: Причина остановки
+        stop_sequence: Сработавшая стоп-последовательность
+        usage: Информация об использовании токенов
+    """
+    id: str
+    type: str = "message"
+    role: str = "assistant"
+    content: List[AnthropicResponseContentBlock]
+    model: str
+    stop_reason: Optional[str] = None  # "end_turn", "max_tokens", "tool_use", "stop_sequence"
+    stop_sequence: Optional[str] = None
+    usage: AnthropicUsage

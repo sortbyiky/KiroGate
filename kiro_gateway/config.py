@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Конфигурация Kiro Gateway.
+KiroBridge 配置。
 
 Централизованное хранение всех настроек, констант и маппингов.
 Загружает переменные окружения и предоставляет типизированный доступ к ним.
@@ -288,12 +289,12 @@ def _warn_deprecated_debug_setting():
         print(warning_text, file=sys.stderr)
 
 # ==================================================================================================
-# Версия приложения
+# 版本信息
 # ==================================================================================================
 
-APP_VERSION: str = "1.0.4"
-APP_TITLE: str = "Kiro API Gateway"
-APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
+APP_VERSION: str = "2.0.0"
+APP_TITLE: str = "KiroGate"
+APP_DESCRIPTION: str = "OpenAI & Anthropic 兼容的 Kiro API 网关。基于 kiro-openai-gateway by Jwadow"
 
 
 def get_kiro_refresh_url(region: str) -> str:

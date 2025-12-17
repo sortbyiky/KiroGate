@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Streaming логика для преобразования потока Kiro в OpenAI формат.
+流式响应处理逻辑，将 Kiro 流转换为 OpenAI/Anthropic 格式。
 
 Содержит генераторы для:
 - Преобразования AWS SSE в OpenAI SSE
@@ -582,4 +583,347 @@ async def collect_stream_response(
             "finish_reason": finish_reason
         }],
         "usage": usage
+    }
+
+
+# ==================================================================================================
+# Anthropic Streaming Functions
+# ==================================================================================================
+
+def generate_anthropic_message_id() -> str:
+    """Генерирует ID сообщения в формате Anthropic."""
+    import uuid
+    return f"msg_{uuid.uuid4().hex[:24]}"
+
+
+async def stream_kiro_to_anthropic(
+    client: httpx.AsyncClient,
+    response: httpx.Response,
+    model: str,
+    model_cache: "ModelInfoCache",
+    auth_manager: "KiroAuthManager",
+    request_messages: Optional[list] = None,
+    request_tools: Optional[list] = None,
+    thinking_enabled: bool = False
+) -> AsyncGenerator[str, None]:
+    """
+    Преобразует поток Kiro в формат Anthropic SSE.
+
+    Anthropic использует другой формат событий:
+    - message_start: начало сообщения
+    - content_block_start: начало блока контента
+    - content_block_delta: дельта контента (text_delta или input_json_delta)
+    - content_block_stop: конец блока контента
+    - message_delta: финальная информация (stop_reason, usage)
+    - message_stop: конец сообщения
+
+    Args:
+        client: HTTP клиент
+        response: HTTP ответ с потоком
+        model: Имя модели
+        model_cache: Кэш моделей
+        auth_manager: Менеджер аутентификации
+        request_messages: Сообщения запроса (для подсчёта токенов)
+        request_tools: Инструменты запроса (для подсчёта токенов)
+        thinking_enabled: Включен ли режим thinking
+
+    Yields:
+        Строки в формате Anthropic SSE
+    """
+    message_id = generate_anthropic_message_id()
+    parser = AwsEventStreamParser()
+    metering_data = None
+    context_usage_percentage = None
+    full_content = ""
+    content_block_index = 0
+    text_block_started = False
+    tool_blocks_started = {}  # tool_id -> index
+
+    try:
+        # Отправляем message_start
+        message_start = {
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": model,
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0}
+            }
+        }
+        yield f"event: message_start\ndata: {json.dumps(message_start, ensure_ascii=False)}\n\n"
+
+        async for chunk in response.aiter_bytes():
+            if debug_logger:
+                debug_logger.log_raw_chunk(chunk)
+
+            events = parser.feed(chunk)
+
+            for event in events:
+                if event["type"] == "content":
+                    content = event["data"]
+                    full_content += content
+
+                    # Если text block ещё не начат, начинаем его
+                    if not text_block_started:
+                        block_start = {
+                            "type": "content_block_start",
+                            "index": content_block_index,
+                            "content_block": {"type": "text", "text": ""}
+                        }
+                        yield f"event: content_block_start\ndata: {json.dumps(block_start, ensure_ascii=False)}\n\n"
+                        text_block_started = True
+
+                    # Отправляем text_delta
+                    delta = {
+                        "type": "content_block_delta",
+                        "index": content_block_index,
+                        "delta": {"type": "text_delta", "text": content}
+                    }
+                    yield f"event: content_block_delta\ndata: {json.dumps(delta, ensure_ascii=False)}\n\n"
+
+                    if debug_logger:
+                        debug_logger.log_modified_chunk(f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n".encode('utf-8'))
+
+                elif event["type"] == "usage":
+                    metering_data = event["data"]
+
+                elif event["type"] == "context_usage":
+                    context_usage_percentage = event["data"]
+
+        # Закрываем text block если был открыт
+        if text_block_started:
+            block_stop = {
+                "type": "content_block_stop",
+                "index": content_block_index
+            }
+            yield f"event: content_block_stop\ndata: {json.dumps(block_stop, ensure_ascii=False)}\n\n"
+            content_block_index += 1
+
+        # Обрабатываем tool calls
+        bracket_tool_calls = parse_bracket_tool_calls(full_content)
+        all_tool_calls = parser.get_tool_calls() + bracket_tool_calls
+        all_tool_calls = deduplicate_tool_calls(all_tool_calls)
+
+        # Отправляем tool_use blocks
+        for tc in all_tool_calls:
+            func = tc.get("function") or {}
+            tool_name = func.get("name") or ""
+            tool_args_str = func.get("arguments") or "{}"
+            tool_id = tc.get("id") or f"toolu_{generate_completion_id()[8:]}"
+
+            try:
+                tool_input = json.loads(tool_args_str)
+            except json.JSONDecodeError:
+                tool_input = {}
+
+            # content_block_start для tool_use
+            tool_block_start = {
+                "type": "content_block_start",
+                "index": content_block_index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": {}
+                }
+            }
+            yield f"event: content_block_start\ndata: {json.dumps(tool_block_start, ensure_ascii=False)}\n\n"
+
+            # input_json_delta
+            if tool_input:
+                input_delta = {
+                    "type": "content_block_delta",
+                    "index": content_block_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": json.dumps(tool_input, ensure_ascii=False)
+                    }
+                }
+                yield f"event: content_block_delta\ndata: {json.dumps(input_delta, ensure_ascii=False)}\n\n"
+
+            # content_block_stop
+            tool_block_stop = {
+                "type": "content_block_stop",
+                "index": content_block_index
+            }
+            yield f"event: content_block_stop\ndata: {json.dumps(tool_block_stop, ensure_ascii=False)}\n\n"
+
+            content_block_index += 1
+
+        # Определяем stop_reason
+        stop_reason = "tool_use" if all_tool_calls else "end_turn"
+
+        # Подсчитываем токены
+        completion_tokens = count_tokens(full_content)
+        total_tokens_from_api = 0
+        if context_usage_percentage is not None and context_usage_percentage > 0:
+            max_input_tokens = model_cache.get_max_input_tokens(model)
+            total_tokens_from_api = int((context_usage_percentage / 100) * max_input_tokens)
+
+        if total_tokens_from_api > 0:
+            input_tokens = max(0, total_tokens_from_api - completion_tokens)
+        else:
+            input_tokens = 0
+            if request_messages:
+                input_tokens += count_message_tokens(request_messages, apply_claude_correction=False)
+            if request_tools:
+                input_tokens += count_tools_tokens(request_tools, apply_claude_correction=False)
+
+        # Отправляем message_delta
+        message_delta = {
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": stop_reason,
+                "stop_sequence": None
+            },
+            "usage": {
+                "output_tokens": completion_tokens
+            }
+        }
+        yield f"event: message_delta\ndata: {json.dumps(message_delta, ensure_ascii=False)}\n\n"
+
+        # Отправляем message_stop
+        yield f"event: message_stop\ndata: {{\"type\": \"message_stop\"}}\n\n"
+
+        logger.debug(
+            f"[Anthropic Usage] {model}: input_tokens={input_tokens}, output_tokens={completion_tokens}"
+        )
+
+    except Exception as e:
+        logger.error(f"Error during Anthropic streaming: {e}", exc_info=True)
+        # Отправляем error event
+        error_event = {
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": str(e)
+            }
+        }
+        yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+    finally:
+        await response.aclose()
+        logger.debug("Anthropic streaming completed")
+
+
+async def collect_anthropic_response(
+    client: httpx.AsyncClient,
+    response: httpx.Response,
+    model: str,
+    model_cache: "ModelInfoCache",
+    auth_manager: "KiroAuthManager",
+    request_messages: Optional[list] = None,
+    request_tools: Optional[list] = None
+) -> dict:
+    """
+    Собирает полный ответ из streaming потока и преобразует в формат Anthropic.
+
+    Args:
+        client: HTTP клиент
+        response: HTTP ответ с потоком
+        model: Имя модели
+        model_cache: Кэш моделей
+        auth_manager: Менеджер аутентификации
+        request_messages: Сообщения запроса
+        request_tools: Инструменты запроса
+
+    Returns:
+        Словарь с ответом в формате Anthropic Messages API
+    """
+    message_id = generate_anthropic_message_id()
+    parser = AwsEventStreamParser()
+    metering_data = None
+    context_usage_percentage = None
+    full_content = ""
+
+    try:
+        async for chunk in response.aiter_bytes():
+            if debug_logger:
+                debug_logger.log_raw_chunk(chunk)
+
+            events = parser.feed(chunk)
+
+            for event in events:
+                if event["type"] == "content":
+                    full_content += event["data"]
+                elif event["type"] == "usage":
+                    metering_data = event["data"]
+                elif event["type"] == "context_usage":
+                    context_usage_percentage = event["data"]
+
+    finally:
+        await response.aclose()
+
+    # Обрабатываем tool calls
+    bracket_tool_calls = parse_bracket_tool_calls(full_content)
+    all_tool_calls = parser.get_tool_calls() + bracket_tool_calls
+    all_tool_calls = deduplicate_tool_calls(all_tool_calls)
+
+    # Формируем content blocks
+    content_blocks = []
+
+    # Добавляем text block если есть контент
+    if full_content:
+        content_blocks.append({
+            "type": "text",
+            "text": full_content
+        })
+
+    # Добавляем tool_use blocks
+    for tc in all_tool_calls:
+        func = tc.get("function") or {}
+        tool_name = func.get("name") or ""
+        tool_args_str = func.get("arguments") or "{}"
+        tool_id = tc.get("id") or f"toolu_{generate_completion_id()[8:]}"
+
+        try:
+            tool_input = json.loads(tool_args_str)
+        except json.JSONDecodeError:
+            tool_input = {}
+
+        content_blocks.append({
+            "type": "tool_use",
+            "id": tool_id,
+            "name": tool_name,
+            "input": tool_input
+        })
+
+    # Определяем stop_reason
+    stop_reason = "tool_use" if all_tool_calls else "end_turn"
+
+    # Подсчитываем токены
+    completion_tokens = count_tokens(full_content)
+    total_tokens_from_api = 0
+    if context_usage_percentage is not None and context_usage_percentage > 0:
+        max_input_tokens = model_cache.get_max_input_tokens(model)
+        total_tokens_from_api = int((context_usage_percentage / 100) * max_input_tokens)
+
+    if total_tokens_from_api > 0:
+        input_tokens = max(0, total_tokens_from_api - completion_tokens)
+    else:
+        input_tokens = 0
+        if request_messages:
+            input_tokens += count_message_tokens(request_messages, apply_claude_correction=False)
+        if request_tools:
+            input_tokens += count_tools_tokens(request_tools, apply_claude_correction=False)
+
+    logger.debug(
+        f"[Anthropic Usage] {model}: input_tokens={input_tokens}, output_tokens={completion_tokens}"
+    )
+
+    return {
+        "id": message_id,
+        "type": "message",
+        "role": "assistant",
+        "content": content_blocks,
+        "model": model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": completion_tokens
+        }
     }

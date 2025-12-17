@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,13 +18,13 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Kiro API Gateway - OpenAI-compatible interface for Kiro API.
+KiroGate - OpenAI & Anthropic 兼容的 Kiro API 网关。
 
-Application entry point. Creates FastAPI app and connects routes.
+应用程序入口点。创建 FastAPI 应用并连接路由。
 
-Usage:
+用法:
     uvicorn main:app --host 0.0.0.0 --port 8000
-    or directly:
+    或直接运行:
     python main.py
 """
 

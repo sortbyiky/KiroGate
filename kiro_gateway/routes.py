@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-FastAPI роуты для Kiro Gateway.
+KiroBridge FastAPI 路由。
 
 Содержит все эндпоинты API:
 - / и /health: Health check
@@ -29,7 +30,7 @@ import json
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from loguru import logger
@@ -43,11 +44,18 @@ from kiro_gateway.models import (
     OpenAIModel,
     ModelList,
     ChatCompletionRequest,
+    AnthropicMessagesRequest,
 )
 from kiro_gateway.auth import KiroAuthManager
 from kiro_gateway.cache import ModelInfoCache
-from kiro_gateway.converters import build_kiro_payload
-from kiro_gateway.streaming import stream_kiro_to_openai, collect_stream_response, stream_with_first_token_retry
+from kiro_gateway.converters import build_kiro_payload, convert_anthropic_to_openai_request
+from kiro_gateway.streaming import (
+    stream_kiro_to_openai,
+    collect_stream_response,
+    stream_with_first_token_retry,
+    stream_kiro_to_anthropic,
+    collect_anthropic_response,
+)
 from kiro_gateway.http_client import KiroHttpClient
 from kiro_gateway.utils import get_kiro_headers, generate_conversation_id
 
@@ -65,15 +73,15 @@ api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 async def verify_api_key(auth_header: str = Security(api_key_header)) -> bool:
     """
     Проверяет API ключ в заголовке Authorization.
-    
+
     Ожидает формат: "Bearer {PROXY_API_KEY}"
-    
+
     Args:
         auth_header: Значение заголовка Authorization
-    
+
     Returns:
         True если ключ валиден
-    
+
     Raises:
         HTTPException: 401 если ключ невалиден или отсутствует
     """
@@ -81,6 +89,38 @@ async def verify_api_key(auth_header: str = Security(api_key_header)) -> bool:
         logger.warning("Access attempt with invalid API key.")
         raise HTTPException(status_code=401, detail="Invalid or missing API Key")
     return True
+
+
+async def verify_anthropic_api_key(
+    x_api_key: str = Header(None, alias="x-api-key"),
+    auth_header: str = Security(api_key_header)
+) -> bool:
+    """
+    Проверяет API ключ в формате Anthropic или OpenAI.
+
+    Anthropic использует заголовок x-api-key, но мы также поддерживаем
+    стандартный Authorization: Bearer для совместимости.
+
+    Args:
+        x_api_key: Значение заголовка x-api-key (Anthropic формат)
+        auth_header: Значение заголовка Authorization (OpenAI формат)
+
+    Returns:
+        True если ключ валиден
+
+    Raises:
+        HTTPException: 401 если ключ невалиден или отсутствует
+    """
+    # Проверяем x-api-key (Anthropic формат)
+    if x_api_key and x_api_key == PROXY_API_KEY:
+        return True
+
+    # Проверяем Authorization: Bearer (OpenAI формат)
+    if auth_header and auth_header == f"Bearer {PROXY_API_KEY}":
+        return True
+
+    logger.warning("Access attempt with invalid API key (Anthropic endpoint).")
+    raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
 
 # --- Роутер ---
@@ -367,6 +407,199 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         # Логируем access log для внутренней ошибки
         logger.error(f"HTTP 500 - POST /v1/chat/completions - {str(e)[:100]}")
         # Сбрасываем debug логи при внутренней ошибке (режим "errors")
+        if debug_logger:
+            debug_logger.flush_on_error(500, str(e))
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+# ==================================================================================================
+# Anthropic Messages API Endpoint (/v1/messages)
+# ==================================================================================================
+
+@router.post("/v1/messages", dependencies=[Depends(verify_anthropic_api_key)])
+async def anthropic_messages(request: Request, request_data: AnthropicMessagesRequest):
+    """
+    Anthropic Messages API endpoint - совместим с Anthropic SDK.
+
+    Принимает запросы в формате Anthropic и транслирует их в Kiro API.
+    Поддерживает streaming и non-streaming режимы.
+
+    Args:
+        request: FastAPI Request для доступа к app.state
+        request_data: Запрос в формате Anthropic MessagesRequest
+
+    Returns:
+        StreamingResponse для streaming режима
+        JSONResponse для non-streaming режима
+
+    Raises:
+        HTTPException: При ошибках валидации или API
+    """
+    logger.info(f"Request to /v1/messages (model={request_data.model}, stream={request_data.stream})")
+
+    auth_manager: KiroAuthManager = request.app.state.auth_manager
+    model_cache: ModelInfoCache = request.app.state.model_cache
+
+    # Подготовка отладочных логов
+    if debug_logger:
+        debug_logger.prepare_new_request()
+
+    # Логируем входящий запрос
+    try:
+        request_body = json.dumps(request_data.model_dump(), ensure_ascii=False, indent=2).encode('utf-8')
+        if debug_logger:
+            debug_logger.log_request_body(request_body)
+    except Exception as e:
+        logger.warning(f"Failed to log request body: {e}")
+
+    # Конвертируем Anthropic запрос в OpenAI формат для повторного использования логики
+    try:
+        openai_request = convert_anthropic_to_openai_request(request_data)
+    except Exception as e:
+        logger.error(f"Failed to convert Anthropic request: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request format: {str(e)}")
+
+    # Генерируем ID для разговора
+    conversation_id = generate_conversation_id()
+
+    # Строим payload для Kiro
+    try:
+        kiro_payload = build_kiro_payload(
+            openai_request,
+            conversation_id,
+            auth_manager.profile_arn or ""
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Логируем payload для Kiro
+    try:
+        kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
+        if debug_logger:
+            debug_logger.log_kiro_request_body(kiro_request_body)
+    except Exception as e:
+        logger.warning(f"Failed to log Kiro request: {e}")
+
+    # Создаём HTTP клиент с retry логикой
+    http_client = KiroHttpClient(auth_manager)
+    url = f"{auth_manager.api_host}/generateAssistantResponse"
+
+    try:
+        # Делаем запрос к Kiro API
+        response = await http_client.request_with_retry(
+            "POST",
+            url,
+            kiro_payload,
+            stream=True
+        )
+
+        if response.status_code != 200:
+            try:
+                error_content = await response.aread()
+            except Exception:
+                error_content = b"Unknown error"
+
+            await http_client.close()
+            error_text = error_content.decode('utf-8', errors='replace')
+            logger.error(f"Error from Kiro API: {response.status_code} - {error_text}")
+
+            # Пытаемся распарсить JSON ответ от Kiro
+            error_message = error_text
+            try:
+                error_json = json.loads(error_text)
+                if "message" in error_json:
+                    error_message = error_json["message"]
+                    if "reason" in error_json:
+                        error_message = f"{error_message} (reason: {error_json['reason']})"
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+            logger.warning(
+                f"HTTP {response.status_code} - POST /v1/messages - {error_message[:100]}"
+            )
+
+            if debug_logger:
+                debug_logger.flush_on_error(response.status_code, error_message)
+
+            # Возвращаем ошибку в формате Anthropic API
+            return JSONResponse(
+                status_code=response.status_code,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "message": error_message
+                    }
+                }
+            )
+
+        # Подготавливаем данные для подсчёта токенов
+        messages_for_tokenizer = [msg.model_dump() for msg in openai_request.messages]
+        tools_for_tokenizer = [tool.model_dump() for tool in openai_request.tools] if openai_request.tools else None
+
+        if request_data.stream:
+            # Streaming режим
+            async def stream_wrapper():
+                streaming_error = None
+                try:
+                    async for chunk in stream_kiro_to_anthropic(
+                        http_client.client,
+                        response,
+                        request_data.model,
+                        model_cache,
+                        auth_manager,
+                        request_messages=messages_for_tokenizer,
+                        request_tools=tools_for_tokenizer,
+                        thinking_enabled=request_data.thinking is not None
+                    ):
+                        yield chunk
+                except Exception as e:
+                    streaming_error = e
+                    raise
+                finally:
+                    await http_client.close()
+                    if streaming_error:
+                        logger.error(f"HTTP 500 - POST /v1/messages (streaming) - {str(streaming_error)[:100]}")
+                    else:
+                        logger.info(f"HTTP 200 - POST /v1/messages (streaming) - completed")
+                    if debug_logger:
+                        if streaming_error:
+                            debug_logger.flush_on_error(500, str(streaming_error))
+                        else:
+                            debug_logger.discard_buffers()
+
+            return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
+
+        else:
+            # Non-streaming режим
+            anthropic_response = await collect_anthropic_response(
+                http_client.client,
+                response,
+                request_data.model,
+                model_cache,
+                auth_manager,
+                request_messages=messages_for_tokenizer,
+                request_tools=tools_for_tokenizer
+            )
+
+            await http_client.close()
+            logger.info(f"HTTP 200 - POST /v1/messages (non-streaming) - completed")
+
+            if debug_logger:
+                debug_logger.discard_buffers()
+
+            return JSONResponse(content=anthropic_response)
+
+    except HTTPException as e:
+        await http_client.close()
+        logger.warning(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
+        if debug_logger:
+            debug_logger.flush_on_error(e.status_code, str(e.detail))
+        raise
+    except Exception as e:
+        await http_client.close()
+        logger.error(f"Internal error: {e}", exc_info=True)
+        logger.error(f"HTTP 500 - POST /v1/messages - {str(e)[:100]}")
         if debug_logger:
             debug_logger.flush_on_error(500, str(e))
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")

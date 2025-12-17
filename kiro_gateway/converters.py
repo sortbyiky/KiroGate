@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Конвертеры для преобразования форматов OpenAI <-> Kiro.
+OpenAI <-> Kiro 格式转换器。
 
 Содержит функции для:
 - Извлечения текстового контента из различных форматов
@@ -32,7 +33,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from kiro_gateway.config import get_internal_model_id, TOOL_DESCRIPTION_MAX_LENGTH
-from kiro_gateway.models import ChatMessage, ChatCompletionRequest, Tool
+from kiro_gateway.models import (
+    ChatMessage,
+    ChatCompletionRequest,
+    Tool,
+    ToolFunction,
+    AnthropicMessage,
+    AnthropicMessagesRequest,
+    AnthropicTool,
+    AnthropicContentBlock,
+)
 
 
 def extract_text_content(content: Any) -> str:
@@ -550,5 +560,287 @@ def _build_user_input_context(
     tool_results = _extract_tool_results(current_message.content)
     if tool_results:
         context["toolResults"] = tool_results
-    
+
     return context
+
+
+# ==================================================================================================
+# Anthropic -> OpenAI Conversion Functions
+# ==================================================================================================
+
+def convert_anthropic_tools_to_openai(tools: Optional[List[AnthropicTool]]) -> Optional[List[Tool]]:
+    """
+    Преобразует Anthropic tools в формат OpenAI.
+
+    Anthropic использует input_schema, OpenAI использует parameters.
+
+    Args:
+        tools: Список инструментов в формате Anthropic
+
+    Returns:
+        Список инструментов в формате OpenAI или None
+    """
+    if not tools:
+        return None
+
+    openai_tools = []
+    for tool in tools:
+        openai_tool = Tool(
+            type="function",
+            function=ToolFunction(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.input_schema
+            )
+        )
+        openai_tools.append(openai_tool)
+
+    return openai_tools
+
+
+def _extract_anthropic_system_prompt(system: Optional[Any]) -> str:
+    """
+    Извлекает системный промпт из Anthropic формата.
+
+    Args:
+        system: Системный промпт (строка или список блоков)
+
+    Returns:
+        Системный промпт в виде строки
+    """
+    if system is None:
+        return ""
+
+    if isinstance(system, str):
+        return system
+
+    if isinstance(system, list):
+        text_parts = []
+        for block in system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+        return "\n".join(text_parts)
+
+    return str(system)
+
+
+def _convert_anthropic_content_to_openai(
+    content: Any,
+    role: str
+) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]], Optional[str]]:
+    """
+    Преобразует Anthropic content в формат OpenAI.
+
+    Args:
+        content: Content в формате Anthropic (строка или список блоков)
+        role: Роль сообщения (user или assistant)
+
+    Returns:
+        Tuple из (text_content, tool_calls, tool_call_id)
+    """
+    if isinstance(content, str):
+        return content, None, None
+
+    if not isinstance(content, list):
+        return str(content) if content else None, None, None
+
+    text_parts = []
+    tool_calls = []
+    tool_results = []
+
+    for block in content:
+        if isinstance(block, dict):
+            block_type = block.get("type")
+
+            if block_type == "text":
+                text_parts.append(block.get("text", ""))
+
+            elif block_type == "image":
+                # Image content - для Kiro нужно будет обработать отдельно
+                # Пока добавляем placeholder
+                source = block.get("source", {})
+                if source.get("type") == "base64":
+                    text_parts.append(f"[Image: {source.get('media_type', 'image')}]")
+                elif source.get("type") == "url":
+                    text_parts.append(f"[Image URL: {source.get('url', '')}]")
+
+            elif block_type == "tool_use":
+                # Assistant's tool call
+                tool_call = {
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name", ""),
+                        "arguments": json.dumps(block.get("input", {}))
+                    }
+                }
+                tool_calls.append(tool_call)
+
+            elif block_type == "tool_result":
+                # User's tool result
+                tool_result = {
+                    "type": "tool_result",
+                    "tool_use_id": block.get("tool_use_id", ""),
+                    "content": _extract_tool_result_content(block.get("content")),
+                    "is_error": block.get("is_error", False)
+                }
+                tool_results.append(tool_result)
+
+            elif block_type == "thinking":
+                # Thinking block - добавляем в текст с пометкой
+                thinking_text = block.get("thinking", "")
+                if thinking_text:
+                    text_parts.append(f"<thinking>{thinking_text}</thinking>")
+
+        elif isinstance(block, AnthropicContentBlock):
+            # Pydantic model
+            if block.type == "text":
+                text_parts.append(block.text or "")
+            elif block.type == "tool_use":
+                tool_call = {
+                    "id": block.id or "",
+                    "type": "function",
+                    "function": {
+                        "name": block.name or "",
+                        "arguments": json.dumps(block.input or {})
+                    }
+                }
+                tool_calls.append(tool_call)
+            elif block.type == "tool_result":
+                tool_result = {
+                    "type": "tool_result",
+                    "tool_use_id": block.tool_use_id or "",
+                    "content": _extract_tool_result_content(block.content),
+                    "is_error": block.is_error or False
+                }
+                tool_results.append(tool_result)
+
+    text_content = "\n".join(text_parts) if text_parts else None
+
+    # Если есть tool_results, возвращаем их как content (для обработки в merge_adjacent_messages)
+    if tool_results:
+        return tool_results, None, None
+
+    return text_content, tool_calls if tool_calls else None, None
+
+
+def _extract_tool_result_content(content: Any) -> str:
+    """
+    Извлекает текстовое содержимое из tool_result.
+
+    Args:
+        content: Content tool_result (строка или список блоков)
+
+    Returns:
+        Текстовое содержимое
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "\n".join(text_parts)
+    return str(content)
+
+
+def convert_anthropic_messages_to_openai(
+    messages: List[AnthropicMessage],
+    system: Optional[Any] = None
+) -> List[ChatMessage]:
+    """
+    Преобразует Anthropic messages в формат OpenAI.
+
+    Args:
+        messages: Список сообщений в формате Anthropic
+        system: Системный промпт (опционально)
+
+    Returns:
+        Список сообщений в формате OpenAI
+    """
+    openai_messages = []
+
+    # Добавляем системный промпт если есть
+    system_prompt = _extract_anthropic_system_prompt(system)
+    if system_prompt:
+        openai_messages.append(ChatMessage(role="system", content=system_prompt))
+
+    for msg in messages:
+        role = msg.role
+        content, tool_calls, _ = _convert_anthropic_content_to_openai(msg.content, role)
+
+        # Если content - это tool_results, создаем user сообщение с ними
+        if isinstance(content, list) and content and isinstance(content[0], dict) and content[0].get("type") == "tool_result":
+            openai_messages.append(ChatMessage(
+                role="user",
+                content=content
+            ))
+        elif role == "assistant":
+            openai_messages.append(ChatMessage(
+                role="assistant",
+                content=content or "",
+                tool_calls=tool_calls
+            ))
+        else:
+            openai_messages.append(ChatMessage(
+                role="user",
+                content=content or ""
+            ))
+
+    return openai_messages
+
+
+def convert_anthropic_to_openai_request(
+    anthropic_request: AnthropicMessagesRequest
+) -> ChatCompletionRequest:
+    """
+    Преобразует Anthropic MessagesRequest в OpenAI ChatCompletionRequest.
+
+    Args:
+        anthropic_request: Запрос в формате Anthropic
+
+    Returns:
+        Запрос в формате OpenAI
+    """
+    # Конвертируем сообщения
+    openai_messages = convert_anthropic_messages_to_openai(
+        anthropic_request.messages,
+        anthropic_request.system
+    )
+
+    # Конвертируем tools
+    openai_tools = convert_anthropic_tools_to_openai(anthropic_request.tools)
+
+    # Конвертируем tool_choice
+    openai_tool_choice = None
+    if anthropic_request.tool_choice:
+        tc_type = anthropic_request.tool_choice.get("type")
+        if tc_type == "auto":
+            openai_tool_choice = "auto"
+        elif tc_type == "any":
+            openai_tool_choice = "required"
+        elif tc_type == "tool":
+            tool_name = anthropic_request.tool_choice.get("name")
+            openai_tool_choice = {"type": "function", "function": {"name": tool_name}}
+        elif tc_type == "none":
+            openai_tool_choice = "none"
+
+    # Конвертируем stop_sequences -> stop
+    stop = anthropic_request.stop_sequences
+
+    return ChatCompletionRequest(
+        model=anthropic_request.model,
+        messages=openai_messages,
+        max_tokens=anthropic_request.max_tokens,
+        temperature=anthropic_request.temperature,
+        top_p=anthropic_request.top_p,
+        stop=stop,
+        tools=openai_tools,
+        tool_choice=openai_tool_choice,
+        stream=anthropic_request.stream
+    )

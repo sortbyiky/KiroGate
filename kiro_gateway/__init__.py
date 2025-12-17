@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# Copyright (C) 2025 Jwadow
+# KiroGate
+# Based on kiro-openai-gateway by Jwadow (https://github.com/Jwadow/kiro-openai-gateway)
+# Original Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -17,30 +18,32 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Kiro Gateway - OpenAI-совместимый прокси для Kiro API.
+KiroGate - OpenAI & Anthropic 兼容的 Kiro API 代理。
 
-Этот пакет предоставляет модульную архитектуру для проксирования
-запросов OpenAI API к Kiro (AWS CodeWhisperer).
+本包提供模块化架构，用于将 OpenAI/Anthropic API 请求代理到 Kiro (AWS CodeWhisperer)。
 
-Модули:
-    - config: Конфигурация и константы
-    - models: Pydantic модели для OpenAI API
-    - auth: Менеджер аутентификации Kiro
-    - cache: Кэш метаданных моделей
-    - utils: Вспомогательные утилиты
-    - converters: Конвертация OpenAI <-> Kiro форматов
-    - parsers: Парсеры AWS SSE потоков
-    - streaming: Логика стриминга ответов
-    - http_client: HTTP клиент с retry логикой
-    - routes: FastAPI роуты
-    - exceptions: Обработчики исключений
+支持两种 API 格式:
+    - OpenAI API: /v1/chat/completions
+    - Anthropic API: /v1/messages
+
+模块:
+    - config: 配置和常量
+    - models: OpenAI 和 Anthropic API 的 Pydantic 模型
+    - auth: Kiro 认证管理器
+    - cache: 模型元数据缓存
+    - utils: 辅助工具函数
+    - converters: OpenAI/Anthropic <-> Kiro 格式转换
+    - parsers: AWS SSE 流解析器
+    - streaming: 流式响应处理逻辑
+    - http_client: 带重试逻辑的 HTTP 客户端
+    - routes: FastAPI 路由
+    - exceptions: 异常处理器
 """
 
-# Версия импортируется из config.py — единственного источника истины (Single Source of Truth)
-# Это позволяет менять версию только в одном месте
+# 版本从 config.py 导入 - 单一数据源 (Single Source of Truth)
 from kiro_gateway.config import APP_VERSION as __version__
 
-__author__ = "Jwadow"
+__author__ = "Based on kiro-openai-gateway by Jwadow"
 
 # Основные компоненты для удобного импорта
 from kiro_gateway.auth import KiroAuthManager
@@ -48,13 +51,15 @@ from kiro_gateway.cache import ModelInfoCache
 from kiro_gateway.http_client import KiroHttpClient
 from kiro_gateway.routes import router
 
-# Конфигурация
+# 配置
 from kiro_gateway.config import (
     PROXY_API_KEY,
     REGION,
     MODEL_MAPPING,
     AVAILABLE_MODELS,
     APP_VERSION,
+    APP_TITLE,
+    APP_DESCRIPTION,
 )
 
 # Модели
@@ -63,6 +68,13 @@ from kiro_gateway.models import (
     ChatMessage,
     OpenAIModel,
     ModelList,
+    # Anthropic models
+    AnthropicMessagesRequest,
+    AnthropicMessage,
+    AnthropicTool,
+    AnthropicContentBlock,
+    AnthropicMessagesResponse,
+    AnthropicUsage,
 )
 
 # Конвертеры
@@ -70,6 +82,10 @@ from kiro_gateway.converters import (
     build_kiro_payload,
     extract_text_content,
     merge_adjacent_messages,
+    # Anthropic converters
+    convert_anthropic_to_openai_request,
+    convert_anthropic_tools_to_openai,
+    convert_anthropic_messages_to_openai,
 )
 
 # Парсеры
@@ -82,6 +98,9 @@ from kiro_gateway.parsers import (
 from kiro_gateway.streaming import (
     stream_kiro_to_openai,
     collect_stream_response,
+    # Anthropic streaming
+    stream_kiro_to_anthropic,
+    collect_anthropic_response,
 )
 
 # Exceptions
@@ -93,39 +112,54 @@ from kiro_gateway.exceptions import (
 __all__ = [
     # Версия
     "__version__",
-    
+
     # Основные классы
     "KiroAuthManager",
     "ModelInfoCache",
     "KiroHttpClient",
     "router",
-    
-    # Конфигурация
+
+    # 配置
     "PROXY_API_KEY",
     "REGION",
     "MODEL_MAPPING",
     "AVAILABLE_MODELS",
     "APP_VERSION",
-    
-    # Модели
+    "APP_TITLE",
+    "APP_DESCRIPTION",
+
+    # OpenAI модели
     "ChatCompletionRequest",
     "ChatMessage",
     "OpenAIModel",
     "ModelList",
-    
+
+    # Anthropic модели
+    "AnthropicMessagesRequest",
+    "AnthropicMessage",
+    "AnthropicTool",
+    "AnthropicContentBlock",
+    "AnthropicMessagesResponse",
+    "AnthropicUsage",
+
     # Конвертеры
     "build_kiro_payload",
     "extract_text_content",
     "merge_adjacent_messages",
-    
+    "convert_anthropic_to_openai_request",
+    "convert_anthropic_tools_to_openai",
+    "convert_anthropic_messages_to_openai",
+
     # Парсеры
     "AwsEventStreamParser",
     "parse_bracket_tool_calls",
-    
+
     # Streaming
     "stream_kiro_to_openai",
     "collect_stream_response",
-    
+    "stream_kiro_to_anthropic",
+    "collect_anthropic_response",
+
     # Exceptions
     "validation_exception_handler",
     "sanitize_validation_errors",
