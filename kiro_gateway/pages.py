@@ -644,14 +644,14 @@ COMMON_NAV = f'''
   <script>
     let currentAnnouncementId = null;
 
-    function escapeHtml(value) {
-      return String(value ?? '')
+    function escapeHtml(value) {{
+      return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
-    }
+    }}
 
     (function() {{
       const modeEl = document.getElementById('siteModeText');
@@ -2691,14 +2691,14 @@ def render_admin_page() -> str:
     let currentTab = 'overview';
     const allTabs = ['overview','users','donated-tokens','ip-stats','blacklist','tokens','announcement','system'];
 
-    function escapeHtml(value) {
-      return String(value ?? '')
+    function escapeHtml(value) {{
+      return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
-    }
+    }}
 
     function buildQuery(params) {{
       const qs = new URLSearchParams();
@@ -4107,25 +4107,28 @@ def render_user_page(user) -> str:
           <button type="button" class="filter-chip" data-group="keys-active" data-value="false" onclick="setKeysActive('false')">停用</button>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm data-table">
-            <thead>
-              <tr style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
-                <th class="text-left py-3 px-3">
-                  <input type="checkbox" id="selectAllKeys" onchange="toggleSelectAllKeys()" style="cursor: pointer;">
-                </th>
-                <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('key_prefix')">Key ↕</th>
-                <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('name')">名称 ↕</th>
-                <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('request_count')">请求数 ↕</th>
-                <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('last_used')">最后使用 ↕</th>
-                <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('created_at')">创建时间 ↕</th>
-                <th class="text-left py-3 px-3">操作</th>
-              </tr>
+            <table class="w-full text-sm data-table">
+              <thead>
+                <tr style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
+                  <th class="text-left py-3 px-3">
+                    <input type="checkbox" id="selectAllKeys" onchange="toggleSelectAllKeys()" style="cursor: pointer;">
+                  </th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('key_prefix')">Key ↕</th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('name')">名称 ↕</th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('is_active')">状态 ↕</th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('request_count')">请求数 ↕</th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('last_used')">最后使用 ↕</th>
+                  <th class="text-left py-3 px-3 cursor-pointer hover:text-indigo-400" onclick="sortKeys('created_at')">创建时间 ↕</th>
+                  <th class="text-left py-3 px-3">操作</th>
+                </tr>
             </thead>
             <tbody id="keyTable"></tbody>
           </table>
         </div>
         <div class="flex items-center justify-between mt-4 pt-4" style="border-top: 1px solid var(--border);">
           <div class="flex items-center gap-2">
+            <button onclick="batchSetKeysActive(true)" class="text-xs px-3 py-1.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30" id="batchEnableKeysBtn" style="display: none;">批量启用</button>
+            <button onclick="batchSetKeysActive(false)" class="text-xs px-3 py-1.5 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" id="batchDisableKeysBtn" style="display: none;">批量停用</button>
             <button onclick="batchDeleteKeys()" class="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30" id="batchDeleteKeysBtn" style="display: none;">批量删除</button>
             <span id="selectedKeysCount" class="text-sm" style="color: var(--text-muted); display: none;"></span>
           </div>
@@ -4780,7 +4783,7 @@ def render_user_page(user) -> str:
     function renderKeysTable(keys) {{
       const tb = document.getElementById('keyTable');
       if (!keys || !keys.length) {{
-        tb.innerHTML = '<tr><td colspan="7" class="py-8 text-center" style="color: var(--text-muted);"><div class="mb-3">还没有 API Key，生成一个开始使用吧</div><button type="button" onclick="generateKey()" class="btn-primary text-sm px-3 py-1.5">+ 生成 API Key</button></td></tr>';
+        tb.innerHTML = '<tr><td colspan="8" class="py-8 text-center" style="color: var(--text-muted);"><div class="mb-3">还没有 API Key，生成一个开始使用吧</div><button type="button" onclick="generateKey()" class="btn-primary text-sm px-3 py-1.5">+ 生成 API Key</button></td></tr>';
         document.getElementById('keysPagination').style.display = 'none';
         return;
       }}
@@ -4788,6 +4791,15 @@ def render_user_page(user) -> str:
         const keyPrefix = escapeHtml(k.key_prefix || '');
         const name = escapeHtml(k.name || '-');
         const nameTitle = escapeHtml(k.name || '');
+        const isActive = Boolean(k.is_active);
+        const statusBadge = isActive
+          ? '<span class="text-green-400">启用</span>'
+          : '<span class="text-gray-400">停用</span>';
+        const nextActive = isActive ? 'false' : 'true';
+        const toggleLabel = isActive ? '停用' : '启用';
+        const toggleClass = isActive
+          ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+          : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30';
         return `
         <tr class="table-row">
           <td class="py-3 px-3">
@@ -4797,10 +4809,14 @@ def render_user_page(user) -> str:
           <td class="py-3 px-3">
             <span title="${{nameTitle}}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;">${{name}}</span>
           </td>
+          <td class="py-3 px-3">${{statusBadge}}</td>
           <td class="py-3 px-3">${{k.request_count}}</td>
           <td class="py-3 px-3">${{k.last_used ? new Date(k.last_used).toLocaleString() : '-'}}</td>
           <td class="py-3 px-3">${{k.created_at ? new Date(k.created_at).toLocaleString() : '-'}}</td>
-          <td class="py-3 px-3"><button onclick="deleteKey(${{k.id}})" class="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30">删除</button></td>
+          <td class="py-3 px-3">
+            <button onclick="setKeyActive(${{k.id}}, ${{nextActive}})" class="text-xs px-2 py-1 rounded ${{toggleClass}} mr-1">${{toggleLabel}}</button>
+            <button onclick="deleteKey(${{k.id}})" class="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30">删除</button>
+          </td>
         </tr>
       `;
       }}).join('');
@@ -4879,15 +4895,62 @@ def render_user_page(user) -> str:
     function updateBatchDeleteUI() {{
       const count = selectedKeys.size;
       const btn = document.getElementById('batchDeleteKeysBtn');
+      const enableBtn = document.getElementById('batchEnableKeysBtn');
+      const disableBtn = document.getElementById('batchDisableKeysBtn');
       const countSpan = document.getElementById('selectedKeysCount');
       if (count > 0) {{
         btn.style.display = 'inline-block';
+        if (enableBtn) enableBtn.style.display = 'inline-block';
+        if (disableBtn) disableBtn.style.display = 'inline-block';
         countSpan.style.display = 'inline';
         countSpan.textContent = `已选择 ${{count}} 个`;
       }} else {{
         btn.style.display = 'none';
+        if (enableBtn) enableBtn.style.display = 'none';
+        if (disableBtn) disableBtn.style.display = 'none';
         countSpan.style.display = 'none';
       }}
+    }}
+
+    async function setKeyActive(keyId, isActive) {{
+      const fd = new FormData();
+      fd.append('is_active', isActive ? 'true' : 'false');
+      try {{
+        await fetchJson('/user/api/keys/' + keyId, {{ method: 'PUT', body: fd }});
+        loadKeys();
+        loadProfile();
+      }} catch (e) {{
+        showConfirmModal({{
+          title: '失败',
+          message: e.error || e.message || '更新失败，请稍后重试',
+          icon: '❌',
+          confirmText: '好的',
+          danger: false
+        }});
+      }}
+    }}
+
+    async function batchSetKeysActive(isActive) {{
+      if (selectedKeys.size === 0) return;
+      const actionLabel = isActive ? '启用' : '停用';
+      const confirmed = await showConfirmModal({{
+        title: `批量${{actionLabel}} API Keys`,
+        message: `确定要${{actionLabel}}选中的 ${{selectedKeys.size}} 个 API Key 吗？`,
+        icon: isActive ? '✅' : '⏸️',
+        confirmText: actionLabel,
+        danger: !isActive
+      }});
+      if (!confirmed) return;
+
+      const promises = Array.from(selectedKeys).map(keyId => {{
+        const fd = new FormData();
+        fd.append('is_active', isActive ? 'true' : 'false');
+        return fetch('/user/api/keys/' + keyId, {{ method: 'PUT', body: fd }});
+      }});
+      await Promise.all(promises);
+      selectedKeys.clear();
+      loadKeys();
+      loadProfile();
     }}
 
     async function batchDeleteKeys() {{
