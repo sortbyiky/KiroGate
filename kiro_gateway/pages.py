@@ -1966,7 +1966,13 @@ async function refreshData(){{
   }}catch(e){{console.error(e)}}
 }}
 
-lc=echarts.init(document.getElementById('latencyChart'));
+// 等待 echarts 和 Chart 加载完成
+function initDashboardCharts() {{
+  if (typeof echarts === 'undefined' || typeof Chart === 'undefined') {{
+    setTimeout(initDashboardCharts, 100);
+    return;
+  }}
+  lc=echarts.init(document.getElementById('latencyChart'));
 lc.setOption({{
   tooltip:{{trigger:'axis',backgroundColor:isDark?'rgba(17,24,39,0.95)':'rgba(255,255,255,0.95)',borderColor:isDark?'#334155':'#e2e8f0',textStyle:{{color:isDark?'#e2e8f0':'#0f172a'}}}},
   grid:{{left:'3%',right:'4%',bottom:'3%',containLabel:true}},
@@ -2002,9 +2008,17 @@ sc=new Chart(document.getElementById('statusChart'),{{
   }}
 }});
 
-refreshData();
-setInterval(refreshData,5000);
-window.addEventListener('resize',()=>lc.resize());
+  refreshData();
+  setInterval(refreshData,5000);
+  window.addEventListener('resize',()=>lc.resize());
+}}
+
+// 页面加载完成后初始化图表
+if (document.readyState === 'loading') {{
+  document.addEventListener('DOMContentLoaded', initDashboardCharts);
+}} else {{
+  initDashboardCharts();
+}}
   </script>
 </body>
 </html>'''
