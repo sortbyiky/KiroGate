@@ -116,12 +116,12 @@ async function refreshAccountToken(account: ProxyAccount): Promise<boolean> {
     let resp: Response
     
     if (isIdc) {
-      // IdC 刷新逻辑
+      // IdC 刷新逻辑 - 字段必须是 camelCase
       const payload = {
-        client_id: account.clientId,
-        client_secret: account.clientSecret,
-        refresh_token: account.refreshToken,
-        grant_type: 'refresh_token'
+        clientId: account.clientId,
+        clientSecret: account.clientSecret,
+        refreshToken: account.refreshToken,
+        grantType: 'refresh_token'
       }
       resp = await fetch(KIRO_IDC_REFRESH_URL(region), {
         method: 'POST',
