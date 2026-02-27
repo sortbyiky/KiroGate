@@ -99,6 +99,8 @@ const metrics = {
 
 // Token 刷新相关
 const KIRO_REFRESH_URL = (region: string) => `https://prod.${region}.auth.desktop.kiro.dev/refreshToken`
+const KIRO_IDC_REFRESH_URL = (region: string) => `https://oidc.${region}.amazonaws.com/token`
+const IDC_AMZ_USER_AGENT = "aws-sdk-js/3.738.0 ua/2.1 os/other lang/js md/browser#unknown_unknown api/sso-oidc#3.738.0 m/E KiroIDE"
 
 // ============================================================================
 // Token 刷新
@@ -106,15 +108,39 @@ const KIRO_REFRESH_URL = (region: string) => `https://prod.${region}.auth.deskto
 async function refreshAccountToken(account: ProxyAccount): Promise<boolean> {
   if (!account.refreshToken) return false
   const region = account.region || 'us-east-1'
+  
+  // 判断是否为 IdC 账号 (AWS SSO OIDC)
+  const isIdc = !!(account.clientId && account.clientSecret)
+  
   try {
-    const payload: Record<string, string> = { refreshToken: account.refreshToken }
-    if (account.clientId) payload.clientId = account.clientId
-    if (account.clientSecret) payload.clientSecret = account.clientSecret
+    let resp: Response
+    
+    if (isIdc) {
+      // IdC 刷新逻辑
+      const payload = {
+        client_id: account.clientId,
+        client_secret: account.clientSecret,
+        refresh_token: account.refreshToken,
+        grant_type: 'refresh_token'
+      }
+      resp = await fetch(KIRO_IDC_REFRESH_URL(region), {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-amz-user-agent': IDC_AMZ_USER_AGENT,
+          'User-Agent': 'node'
+        },
+        body: JSON.stringify(payload)
+      })
+    } else {
+      // 普通 Social 刷新逻辑
+      resp = await fetch(KIRO_REFRESH_URL(region), {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: account.refreshToken })
+      })
+    }
 
-    const resp = await fetch(KIRO_REFRESH_URL(region), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
     if (!resp.ok) {
       const text = await resp.text()
       logger.error('Auth', `Refresh failed for ${account.email || account.id}: ${resp.status} ${text.slice(0, 200)}`)
