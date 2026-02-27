@@ -107,9 +107,13 @@ async function refreshAccountToken(account: ProxyAccount): Promise<boolean> {
   if (!account.refreshToken) return false
   const region = account.region || 'us-east-1'
   try {
+    const payload: Record<string, string> = { refreshToken: account.refreshToken }
+    if (account.clientId) payload.clientId = account.clientId
+    if (account.clientSecret) payload.clientSecret = account.clientSecret
+
     const resp = await fetch(KIRO_REFRESH_URL(region), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: account.refreshToken })
+      body: JSON.stringify(payload)
     })
     if (!resp.ok) {
       const text = await resp.text()
@@ -539,6 +543,7 @@ async function handleAccountsApi(req: Request, path: string): Promise<Response> 
     const account: ProxyAccount = {
       id, email: (body.email as string) || '', accessToken: '',
       refreshToken, region: (body.region as string) || 'us-east-1',
+      clientId: body.clientId as string, clientSecret: body.clientSecret as string,
       machineId: body.machineId as string, profileArn: body.profileArn as string,
       isAvailable: true, disabled: false, requestCount: 0, errorCount: 0
     }
@@ -549,6 +554,40 @@ async function handleAccountsApi(req: Request, path: string): Promise<Response> 
     const updated = accountPool.getAccount(id)
     logger.info('Admin', `Account added: ${id} (refreshed: ${refreshed})`)
     return Response.json({ success: true, account: { id, email: account.email, refreshed }, subscriptionType: updated?.subscriptionType })
+  }
+
+  // POST /api/accounts/batch - 批量添加账号
+  if (req.method === 'POST' && path === '/api/accounts/batch') {
+    let body: unknown
+    try { body = await req.json() } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 })
+    }
+    if (!Array.isArray(body)) {
+      return Response.json({ error: 'Expected array of accounts' }, { status: 400 })
+    }
+    
+    const results = []
+    for (const item of body) {
+      const refreshToken = item.refreshToken as string
+      if (!refreshToken) {
+        results.push({ success: false, error: 'refreshToken is required' })
+        continue
+      }
+      const id = item.id as string || `acc_${crypto.randomUUID().slice(0, 8)}`
+      const account: ProxyAccount = {
+        id, email: (item.email as string) || '', accessToken: '',
+        refreshToken, region: (item.region as string) || 'us-east-1',
+        clientId: item.clientId as string, clientSecret: item.clientSecret as string,
+        machineId: item.machineId as string, profileArn: item.profileArn as string,
+        isAvailable: true, disabled: false, requestCount: 0, errorCount: 0
+      }
+      accountPool.addAccount(account)
+      await storageSetAccount(account)
+      const refreshed = await refreshAccountToken(account)
+      results.push({ id, success: true, refreshed })
+    }
+    logger.info('Admin', `Batch added ${results.length} accounts`)
+    return Response.json({ success: true, results })
   }
 
   // 带 ID 的路由: /api/accounts/:id/...
