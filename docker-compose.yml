@@ -1,74 +1,43 @@
-# KiroGate - Docker Compose 配置
+# KiroGate - 服务器部署配置
 #
 # 使用方法:
-#   1. 复制 .env.example 为 .env 并配置
-#   2. docker-compose up -d
-#
-# 或者直接传入环境变量:
-#   PROXY_API_KEY=your-key REFRESH_TOKEN=your-token docker-compose up -d
+#   1. 配置下方环境变量
+#   2. docker compose up -d
 
 services:
   kirogate:
-    build: .
+    image: ghcr.io/sortbyiky/kirogate:latest
     container_name: kirogate
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      # 必填: 代理服务器密码
-      - PROXY_API_KEY=${PROXY_API_KEY:-changeme}
+      # 代理 API 密钥（客户端连接时使用）
+      - PROXY_API_KEY=${PROXY_API_KEY:-sk-kirogate-change-me}
 
-      # 方式一: 使用 refresh token (推荐用于 Docker)
-      - REFRESH_TOKEN=${REFRESH_TOKEN:-}
+      # Kiro 账号 Refresh Token（多个用逗号分隔）
+      - REFRESH_TOKEN=${REFRESH_TOKEN}
 
-      # 方式二: 挂载凭证文件 (见下方 volumes)
-      - KIRO_CREDS_FILE=${KIRO_CREDS_FILE:-}
+      # 服务端口
+      - PORT=8000
 
-      # 可选配置
-      - PROFILE_ARN=${PROFILE_ARN:-}
-      - KIRO_REGION=${KIRO_REGION:-us-east-1}
+      # 日志级别: DEBUG / INFO / WARN / ERROR
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
-      # 超时配置
-      - FIRST_TOKEN_TIMEOUT=${FIRST_TOKEN_TIMEOUT:-45}
-      - FIRST_TOKEN_MAX_RETRIES=${FIRST_TOKEN_MAX_RETRIES:-5}
+      # 每分钟请求限制（0 = 不限制）
+      - RATE_LIMIT=${RATE_LIMIT:-0}
 
-      # 调试模式
-      - DEBUG_MODE=${DEBUG_MODE:-off}
+      # 管理面板密码（留空则禁用面板）
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 
-      # Admin 管理后台
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
-      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY:-change-me-in-production}
-
-      # OAuth2 用户登录（可选）
-      - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
-      - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
-      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-}
-
-      # 用户系统配置
-      - USER_SESSION_SECRET=${USER_SESSION_SECRET:-change-me-in-production}
-      - TOKEN_ENCRYPT_KEY=${TOKEN_ENCRYPT_KEY:-change-me-32-bytes-key!!}
-
-      # 静态资源代理配置
-      - STATIC_ASSETS_PROXY_ENABLED=${STATIC_ASSETS_PROXY_ENABLED:-true}
-      - STATIC_ASSETS_PROXY_BASE=${STATIC_ASSETS_PROXY_BASE:-https://proxy.jhun.edu.kg}
-
+      # 上下文压缩阈值（token 数，0 = 禁用）
+      - COMPRESS_THRESHOLD=${COMPRESS_THRESHOLD:-0}
     volumes:
-      # 持久化统计数据（使用命名卷，自动处理权限）
-      - kirogate_data:/app/data
-      # 如果使用凭证文件，取消下面的注释
-      # - ~/.aws/sso/cache/kiro-auth-token.json:/app/credentials.json:ro
-      # 然后设置 KIRO_CREDS_FILE=/app/credentials.json
-
+      # 持久化 Deno KV 数据
+      - /opt/kirogate/data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-
-volumes:
-  kirogate_data:
